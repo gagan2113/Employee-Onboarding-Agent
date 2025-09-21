@@ -1,0 +1,109 @@
+{
+  "company_policies": {
+    "working_hours": {
+      "title": "Working Hours Policy",
+      "content": "Our standard working hours are 9:00 AM to 6:00 PM, Monday through Friday. We offer flexible working arrangements including remote work options and flexible start times between 8:00 AM and 10:00 AM.",
+      "category": "time_management",
+      "last_updated": "2025-01-15"
+    },
+    "leave_policy": {
+      "title": "Leave and Time Off Policy",
+      "content": "Employees are entitled to 25 days of annual leave, 10 days of sick leave, and 3 days of personal leave per year. Leave requests should be submitted at least 2 weeks in advance through the HR portal.",
+      "category": "benefits",
+      "last_updated": "2025-01-15"
+    },
+    "dress_code": {
+      "title": "Dress Code Policy",
+      "content": "We maintain a business casual dress code. Professional attire is required for client meetings. Casual Fridays allow for more relaxed clothing. Please avoid overly casual items like shorts, flip-flops, or clothing with inappropriate graphics.",
+      "category": "workplace_conduct",
+      "last_updated": "2025-01-10"
+    },
+    "remote_work": {
+      "title": "Remote Work Policy",
+      "content": "Employees may work remotely up to 3 days per week with manager approval. Remote workers must maintain reliable internet connection, professional workspace, and be available during core business hours (10 AM - 3 PM).",
+      "category": "work_arrangements",
+      "last_updated": "2025-01-20"
+    },
+    "technology_use": {
+      "title": "Technology and Internet Usage Policy",
+      "content": "Company technology should be used primarily for business purposes. Limited personal use is acceptable during breaks. Prohibited activities include accessing inappropriate content, downloading unauthorized software, or sharing confidential information.",
+      "category": "security",
+      "last_updated": "2025-01-12"
+    },
+    "anti_harassment": {
+      "title": "Anti-Harassment and Non-Discrimination Policy",
+      "content": "We maintain a zero-tolerance policy for harassment, discrimination, or inappropriate behavior. All employees have the right to a respectful workplace. Report any incidents to HR immediately through our confidential reporting system.",
+      "category": "workplace_conduct",
+      "last_updated": "2025-01-05"
+    },
+    "confidentiality": {
+      "title": "Confidentiality and Data Protection Policy",
+      "content": "Employees must protect confidential company information, client data, and intellectual property. This includes not sharing login credentials, securing physical documents, and following data handling procedures outlined in security training.",
+      "category": "security",
+      "last_updated": "2025-01-18"
+    },
+    "social_media": {
+      "title": "Social Media Policy",
+      "content": "When posting about work or representing the company online, maintain professionalism and respect. Do not share confidential information, customer data, or proprietary content. Clearly distinguish personal opinions from company positions.",
+      "category": "communication",
+      "last_updated": "2025-01-08"
+    },
+    "expense_reimbursement": {
+      "title": "Expense Reimbursement Policy",
+      "content": "Business expenses will be reimbursed with proper documentation and pre-approval for amounts over $100. Submit expense reports within 30 days with original receipts. Approved categories include travel, meals, training, and supplies.",
+      "category": "financial",
+      "last_updated": "2025-01-15"
+    },
+    "professional_development": {
+      "title": "Professional Development Policy",
+      "content": "We support employee growth through training, conferences, and skill development programs. Annual budget of $2,000 per employee for approved learning opportunities. Discuss development goals with your manager during quarterly reviews.",
+      "category": "benefits",
+      "last_updated": "2025-01-10"
+    }
+  },
+  "company_information": {
+    "name": "Your Company Name",
+    "mission": "To deliver exceptional solutions while fostering innovation and growth for our employees and clients.",
+    "values": [
+      "Integrity - We act with honesty and transparency",
+      "Excellence - We strive for the highest quality in everything we do",
+      "Collaboration - We work together to achieve common goals",
+      "Innovation - We embrace change and creative solutions",
+      "Respect - We value diversity and treat everyone with dignity"
+    ],
+    "office_locations": [
+      {
+        "name": "Headquarters",
+        "address": "123 Business Street, Suite 100, City, State 12345",
+        "phone": "+1 (555) 123-4567"
+      }
+    ],
+    "emergency_contacts": {
+      "security": "+1 (555) 911-0000",
+      "facilities": "+1 (555) 123-4568",
+      "hr_hotline": "+1 (555) 123-4569"
+    }
+  },
+  "faqs": {
+    "parking": {
+      "question": "Where can I park?",
+      "answer": "Employee parking is available in the covered garage on levels 2-4. Use your employee ID card for access. Visitor parking is on level 1."
+    },
+    "lunch_schedule": {
+      "question": "What are the lunch break times?",
+      "answer": "Lunch breaks are typically 12:00 PM - 1:00 PM, but can be flexible based on team needs and workload. Coordinate with your manager and team."
+    },
+    "payroll": {
+      "question": "When is payday?",
+      "answer": "Employees are paid bi-weekly on Fridays. Direct deposit is available and recommended. Contact payroll@company.com for any payroll questions."
+    },
+    "benefits_enrollment": {
+      "question": "When can I enroll in benefits?",
+      "answer": "Benefits enrollment begins on your start date and must be completed within 30 days. HR will schedule a benefits orientation session during your first week."
+    },
+    "it_support": {
+      "question": "How do I get IT support?",
+      "answer": "Submit IT tickets through the company portal or email itsupport@company.com. For urgent issues, call the IT helpdesk at extension 1234."
+    }
+  }
+}

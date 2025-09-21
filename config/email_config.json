@@ -1,0 +1,25 @@
+{
+  "email_settings": {
+    "sender_email": "noreply@yourcompany.com",
+    "sender_name": "HR Onboarding Team",
+    "manager_escalation_email": "manager@yourcompany.com",
+    "hr_support_email": "hr@yourcompany.com",
+    "cc_emails": [
+      "backup-hr@yourcompany.com"
+    ]
+  },
+  "email_templates": {
+    "manager_escalation": {
+      "subject": "🚨 Onboarding Task Overdue - Action Required: {employee_name}",
+      "html_template": "<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;margin:20px;}.header{background:#f4f4f4;padding:15px;border-left:4px solid #d32f2f;}.content{padding:20px;}.task-list{background:#fff3cd;padding:15px;border-radius:5px;margin:10px 0;}.footer{margin-top:30px;padding:15px;background:#f8f9fa;border-radius:5px;}</style></head><body><div class='header'><h2>🚨 Onboarding Task Escalation Required</h2></div><div class='content'><p><strong>Employee:</strong> {employee_name}</p><p><strong>Role:</strong> {employee_role}</p><p><strong>Department:</strong> {employee_department}</p><p><strong>Join Date:</strong> {join_date}</p><div class='task-list'><h3>Overdue Tasks:</h3>{task_details}</div><p><strong>Reminder History:</strong></p><ul>{reminder_history}</ul><h3>📋 Recommended Actions:</h3><ul><li>Contact the employee to understand any blockers</li><li>Provide additional resources or support if needed</li><li>Reschedule task deadlines if necessary</li><li>Consider assigning a buddy or mentor</li></ul></div><div class='footer'><p><em>This is an automated notification from the Employee Onboarding System.</em></p><p><strong>Need help?</strong> Contact HR at {hr_email}</p></div></body></html>"
+    },
+    "task_reminder": {
+      "subject": "⏰ Reminder: Onboarding Task Due - {task_title}",
+      "html_template": "<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;margin:20px;}.header{background:#e3f2fd;padding:15px;border-left:4px solid #1976d2;}.content{padding:20px;}.task-info{background:#f8f9fa;padding:15px;border-radius:5px;margin:15px 0;}.action-button{background:#1976d2;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block;margin:10px 0;}</style></head><body><div class='header'><h2>⏰ Task Reminder</h2></div><div class='content'><p>Hi {employee_name},</p><p>This is a friendly reminder about your pending onboarding task:</p><div class='task-info'><h3>{task_title}</h3><p><strong>Description:</strong> {task_description}</p><p><strong>Due Date:</strong> {due_date}</p><p><strong>Priority:</strong> {priority}</p></div><p>Please complete this task at your earliest convenience. If you need any assistance, don't hesitate to reach out!</p><a href='#' class='action-button'>Mark as Completed</a></div><div class='footer'><p><em>Best regards,<br>Your HR Onboarding Team</em></p></div></body></html>"
+    },
+    "welcome_email": {
+      "subject": "🎉 Welcome to {company_name}! Your Onboarding Journey Begins",
+      "html_template": "<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;margin:20px;}.header{background:#4caf50;color:white;padding:20px;text-align:center;}.content{padding:20px;}.welcome-box{background:#f1f8e9;padding:20px;border-radius:10px;margin:15px 0;}.task-preview{background:#fff;border:1px solid #ddd;padding:15px;border-radius:5px;margin:10px 0;}</style></head><body><div class='header'><h1>🎉 Welcome to {company_name}!</h1></div><div class='content'><div class='welcome-box'><h2>Hello {employee_name}!</h2><p>We're thrilled to have you join our team as a <strong>{employee_role}</strong> in the <strong>{employee_department}</strong> department.</p></div><h3>📋 Your Onboarding Tasks</h3><p>To help you get started, we've prepared a personalized onboarding checklist:</p>{task_list}<p>You can track your progress and get help anytime through our Slack bot or by contacting HR.</p><p>Welcome aboard! We're excited to see the amazing things you'll accomplish here.</p></div><div class='footer'><p><em>Warm regards,<br>The {company_name} Team</em></p></div></body></html>"
+    }
+  }
+}

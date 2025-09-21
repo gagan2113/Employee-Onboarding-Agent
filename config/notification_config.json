@@ -1,0 +1,46 @@
+{
+  "reminder_settings": {
+    "first_reminder_delay_days": 0.001,
+    "second_reminder_delay_days": 0.002,
+    "manager_escalation_delay_days": 0.003,
+    "reminder_frequency_hours": 0.5
+  },
+  "notification_settings": {
+    "send_welcome_email": true,
+    "send_task_reminders": true,
+    "send_manager_escalations": true,
+    "send_completion_celebrations": true
+  },
+  "escalation_rules": {
+    "critical_tasks": {
+      "first_reminder_hours": 0.05,
+      "escalation_hours": 0.1
+    },
+    "high_priority_tasks": {
+      "first_reminder_hours": 0.1,
+      "escalation_hours": 0.2
+    },
+    "medium_priority_tasks": {
+      "first_reminder_hours": 0.15,
+      "escalation_hours": 0.3
+    },
+    "low_priority_tasks": {
+      "first_reminder_hours": 0.2,
+      "escalation_hours": 0.4
+    }
+  },
+  "slack_message_templates": {
+    "welcome_channel": "🎉 Welcome {employee_name} to the team! We're excited to have you join us as our new {role}. I've sent you a personal message with your onboarding checklist. If you have any questions, just mention me (@OnboardingBot) and I'll be happy to help!",
+    "welcome_dm": "👋 Hello {employee_name}! Welcome to {company_name}!\n\nI'm your AI-powered onboarding assistant, here to guide you through your first days with us. I've prepared a personalized checklist of tasks to help you get settled in.\n\n📋 **Your Onboarding Tasks:**\n{task_list}\n\n💡 **How I can help:**\n• Type `tasks` to see your full task list\n• Type `progress` to check your completion status\n• Type `completed [task number]` to mark tasks as done\n• Type `help` for all available commands\n• Ask me any questions about company policies or procedures\n\nLet's make your onboarding journey smooth and enjoyable! 🚀",
+    "task_reminder": "⏰ **Reminder:** You have a pending onboarding task!\n\n📋 **Task:** {task_title}\n⏳ **Due:** {due_date}\n🔥 **Priority:** {priority}\n\n{task_description}\n\nNeed help with this task? Just ask me! Type `task help {task_id}` for detailed guidance.",
+    "task_overdue": "🚨 **Overdue Task Alert**\n\n📋 **Task:** {task_title}\n📅 **Was due:** {due_date}\n⏰ **Overdue by:** {overdue_days} days\n\nThis task is now overdue. Please prioritize completing it soon. If you're facing any blockers, don't hesitate to reach out for help!\n\nType `task help {task_id}` for assistance or `completed {task_id}` when done.",
+    "progress_update": "📊 **Your Onboarding Progress**\n\n✅ **Completed:** {completed_tasks}/{total_tasks} tasks ({progress_percentage}%)\n⏳ **In Progress:** {in_progress_tasks}\n📋 **Remaining:** {remaining_tasks}\n\n{progress_bar}\n\n{next_steps}",
+    "task_completed": "🎉 **Great job!** Task completed: {task_title}\n\n📊 **Progress:** {completed_tasks}/{total_tasks} tasks done ({progress_percentage}%)\n\n{encouragement_message}",
+    "all_tasks_completed": "🎊 **Congratulations!** You've completed all your onboarding tasks!\n\nWelcome to the team! You're now fully onboarded and ready to make an impact. If you need any assistance in the future, I'm always here to help.\n\n🚀 **Next Steps:**\n• Schedule regular 1:1s with your manager\n• Join relevant team channels\n• Start working on your first project\n\nWishing you success in your new role! 🌟"
+  },
+  "ai_response_templates": {
+    "policy_query": "📚 **Policy Information**\n\n**Topic:** {policy_topic}\n\n{policy_content}\n\n💡 **Need more details?** You can find the complete policy in the employee handbook or ask me specific questions!",
+    "task_help": "🆘 **Task Assistance: {task_title}**\n\n📝 **Description:** {task_description}\n\n🎯 **Instructions:**\n{task_instructions}\n\n🛠️ **Resources Needed:**\n{resources_needed}\n\n✅ **Success Criteria:**\n{success_criteria}\n\n❓ **Still need help?** Feel free to ask specific questions about this task!",
+    "general_help": "🤖 **I'm here to help!**\n\nI can assist you with:\n• 📋 **Tasks** - View, track, and get help with onboarding tasks\n• 📊 **Progress** - Check your completion status\n• 📚 **Policies** - Answer questions about company policies\n• 💼 **General** - Information about the company, team, and procedures\n\n**Popular commands:**\n• `tasks` - Show your task list\n• `progress` - Check completion status\n• `policies` - Browse company policies\n• `help` - Show this message\n\nJust ask me anything in natural language - I'm designed to understand and help! 😊"
+  }
+}
