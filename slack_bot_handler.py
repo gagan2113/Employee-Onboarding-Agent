@@ -80,9 +80,9 @@ class SlackBotHandler:
         def log_all_events(event, logger):
             logger.info(f"🔍 [DEBUG] Received event: {event.get('type', 'unknown')} - {event}")
         
-        # Add a catch-all message event handler for debugging AND processing
+        # Handle all non-onboarding direct messages
         @self.app.event("message")
-        def handle_message_events(event, say, logger):
+        def handle_general_messages(event, say, logger):
             logger.info(f"🔍 Message event received: {event}")
             
             # Skip bot messages and messages with subtypes (except channel_join)
@@ -97,8 +97,25 @@ class SlackBotHandler:
                 text_lower = text.lower()
                 
                 try:
-                    # Skip hello messages (let the hello handler deal with them)
-                    if text_lower == 'hello':
+                    # Handle onboarding trigger directly to ensure response
+                    if text_lower == 'start my onboarding':
+                        try:
+                            self._start_onboarding_flow(user_id, say, message_channel_type='im')
+                        except Exception as start_err:
+                            logger.error(f"Error in direct onboarding start: {start_err}")
+                            say("Sorry, I couldn't start onboarding right now. Please try again in a moment.")
+                        return
+                    
+                    # Skip profile updated message (let the specific handler deal with it)
+                    if text_lower == 'profile updated':
+                        return
+
+                    # Skip task-related messages (let specific handlers deal with them)
+                    if any(pattern in text_lower for pattern in ['completed task', 'started task', 'help with task']):
+                        return
+                    
+                    # Handle role selection messages
+                    if self._handle_role_selection(text, user_id, say):
                         return
                     
                     # Handle common queries FIRST (no database setup required)
@@ -165,14 +182,17 @@ class SlackBotHandler:
                         logger.error(f"❌ Error handling channel message: {e}")
                         say(f"<@{user_id}> Sorry, I encountered an error processing your message. Please try again or send me a direct message.")
         
-        # Handle direct messages with "hello" - Enhanced 3-phase onboarding
-        @self.app.message("hello")
+        # Handle direct messages with onboarding trigger - Enhanced 3-phase onboarding
+        @self.app.message(re.compile(r"^start my onboarding$", re.IGNORECASE))
         def handle_hello_message(message, say, logger):
             logger.info(f"📨 Received hello message: {message}")
             user_id = message['user']
             channel_id = message['channel']
             
             try:
+                logger.info(f"🔍 DEBUG - Processing hello message from user: {user_id}")
+                logger.info(f"🔍 DEBUG - Channel type: {message.get('channel_type')}")
+                
                 # Check if this is a channel message and handle appropriately
                 if message.get('channel_type') == 'channel':
                     # In channels, direct users to DM for personalized onboarding
@@ -181,7 +201,7 @@ class SlackBotHandler:
 📱 **For personalized onboarding assistance:**
 1️⃣ Click my name: **@Employee Onboarding Agent**
 2️⃣ Select **"Message"** 
-3️⃣ Say **"Hello"** in our direct conversation
+3️⃣ Say **"Start my Onboarding"** in our direct conversation
 
 🤖 **Or ask me questions here about:**
 • 📚 Company policies and procedures
@@ -195,60 +215,95 @@ class SlackBotHandler:
                 
                 # Continue with DM processing for personalized onboarding
                 # Get or create user in database
+                logger.info(f"🔍 DEBUG - Attempting to get/create user: {user_id}")
                 user = self.get_or_create_user(user_id)
+                logger.info(f"🔍 DEBUG - User creation result: {user}")
                 if not user:
+                    logger.error(f"❌ Failed to create/get user for {user_id}")
                     say("👋 Hello! I'm having trouble accessing your information right now. Please try again in a moment.")
                     return
                 
                 # Check if user has completed onboarding
                 if user.onboarding_completed:
-                    response = f"👋 Welcome back, {user.name or 'there'}! Your onboarding is already complete. How can I help you today?"
+                    response = f"👋 Welcome back, {user.full_name or 'there'}! Your onboarding is already complete. How can I help you today?"
                     say(response)
                     return
                 
-                # Phase 1: Profile Completeness Check
+                # Phase 1: Profile Completeness Check (Non-blocking)
+                logger.info(f"🔍 DEBUG - Starting profile analysis for user: {user_id}")
                 profile_analysis = self._analyze_user_profile(user_id)
+                logger.info(f"🔍 DEBUG - Profile analysis result: {profile_analysis.get('completion_score', 'N/A')}%")
                 
+                # Optional: If profile is incomplete, inform user but don't block onboarding
                 if not profile_analysis.get("is_complete", False):
-                    # Store profile analysis and send completion message
                     completion_message = self._create_profile_completion_message(profile_analysis)
-                    say(completion_message)
-                    return
+                    say(f"📋 **Profile Information:** {completion_message}\n\n⚡ **Don't worry - let's continue with your onboarding!**")
+                    # Continue with onboarding instead of returning
                 
-                # Phase 2: Role-based Task Assignment
+                # Phase 2: Role-based Task Assignment (with fallback)
                 try:
                     # Get user profile to determine role
                     user_info = self.app.client.users_info(user=user_id)
                     profile = user_info.get("user", {}).get("profile", {})
                     job_title = profile.get("title", "")
                     
-                    if not job_title:
-                        say("🎯 Great! Your profile looks complete. However, I need your job title to assign the right onboarding tasks. Please update your Slack profile with your job title and say 'profile updated'.")
-                        return
-                    
-                    # Assign role-based tasks
-                    if self._assign_role_based_tasks(user_id, job_title):
-                        # Phase 3: Present task list and start progress monitoring
+                    # Always assign tasks — use generic role if job title missing
+                    inferred_title = job_title or "Other"
+                    if self._assign_role_based_tasks(user_id, inferred_title):
                         task_message = self._format_task_list_message(user_id)
-                        
-                        welcome_intro = f"""🎉 **Welcome to the team, {user.name or 'there'}!**
+                        role_text = job_title if job_title else "General Onboarding"
+                        welcome_intro = f"""🎉 **Welcome to the team, {user.full_name or 'there'}!**
 
-I'm your AI onboarding assistant. I've analyzed your profile and created a personalized onboarding plan based on your role: **{job_title}**
+I'm your AI onboarding assistant. I've created a personalized onboarding plan based on your role: **{role_text}**
 
 """
-                        
                         full_message = welcome_intro + task_message
                         say(full_message)
-                        
                         # Start background monitoring for this user
                         self._initialize_task_monitoring(user_id)
-                        
                     else:
-                        say("❌ I encountered an issue setting up your onboarding tasks. Please contact HR or try again later.")
+                        # Fallback to simple onboarding if task assignment fails
+                        simple_welcome = f"""🎉 **Welcome to the team, {user.full_name or 'there'}!**
+
+I'm your AI onboarding assistant! While I work on setting up your personalized tasks, I can help you with:
+
+• 📚 Company policies and procedures
+• 🕐 Working hours and guidelines  
+• 👔 Dress code information
+• 🤝 General onboarding questions
+• ❓ Any company-related queries
+
+**Ask me anything to get started!** 🚀"""
+                        say(simple_welcome)
                     
                 except Exception as e:
                     logger.error(f"Error in task assignment phase: {e}")
-                    say("🤖 I encountered an issue accessing your profile. Please ensure your Slack profile is complete and try again.")
+                    # Slack API failure: still assign generic tasks and show list
+                    fallback_assigned = self._assign_role_based_tasks(user_id, "Other")
+                    if fallback_assigned:
+                        task_message = self._format_task_list_message(user_id)
+                        welcome_intro = f"""🎉 **Welcome to the team, {user.full_name or 'there'}!**
+
+I'm your AI onboarding assistant. I've created a general onboarding plan to get you started.
+
+"""
+                        say(welcome_intro + task_message)
+                        self._initialize_task_monitoring(user_id)
+                    else:
+                        # Fallback to simple information if even generic tasks fail
+                        simple_welcome = f"""🎉 **Welcome to the team, {user.full_name or 'there'}!**
+
+I'm your AI onboarding assistant! 🤖
+
+I can help you with:
+• 📚 Company policies and procedures
+• 🕐 Working hours and guidelines  
+• 👔 Dress code information
+• 🤝 General onboarding questions
+• ❓ Any company-related queries
+
+**Ask me anything to get started!** 🚀"""
+                        say(simple_welcome)
             
             except Exception as e:
                 logger.error(f"Error in enhanced hello handler: {e}")
@@ -315,19 +370,8 @@ I've created a personalized plan based on your role: **{job_title}**
                     logger.error("No user_id in app_mention event")
                     return
                 
-                # Enhanced greeting for mentions
-                if 'hello' in text or 'hi' in text:
-                    response = f"""👋 Hi <@{user_id}>! I'm your Employee Onboarding Agent!
-                    
-📱 **For the best experience, please send me a direct message:**
-1️⃣ Click my name: **@Employee Onboarding Agent**
-2️⃣ Select **"Message"**
-3️⃣ Say **"Hello"**
-
-I'll then provide your personalized onboarding experience! 🚀"""
-                    say(response)
-                    
-                elif 'help' in text:
+                # Handle help requests
+                if 'help' in text:
                     help_response = f"""<@{user_id}> Here's how I can help:
 
 🤖 **Employee Onboarding Agent Help**
@@ -337,7 +381,7 @@ I'll then provide your personalized onboarding experience! 🚀"""
 • 🤝 Onboarding guidance
 • ❓ General company questions
 
-💡 **For personalized onboarding, send me a DM and say "Hello"!**"""
+💡 **For personalized onboarding, send me a DM and say "Start my Onboarding"!**"""
                     say(help_response)
                     
                 elif 'polic' in text or 'handbook' in text:
@@ -421,7 +465,7 @@ Ready to make onboarding seamless for everyone! 🚀"""
 📱 **Send me a direct message:**
 1️⃣ Click on my name: **@Employee Onboarding Agent**
 2️⃣ Select **"Message"**
-3️⃣ Say **"Hello"** 
+3️⃣ Say **"Start my Onboarding"** 
 
 🎯 **I'll then provide you with:**
 • Profile completeness check
@@ -486,7 +530,7 @@ Ready to make onboarding seamless for everyone! 🚀"""
 📱 **To begin your personalized onboarding:**
 1️⃣ Click my name: **@Employee Onboarding Agent**
 2️⃣ Select **"Message"**
-3️⃣ Say **"Hello"**
+3️⃣ Say **"Start my Onboarding"**
 
 I'll guide you through your complete onboarding process! 🚀"""
                 
@@ -594,7 +638,7 @@ I'll guide you through your complete onboarding process! 🚀"""
 • 🤝 Guide you through your role-specific tasks
 • ❓ Be your 24/7 onboarding companion!
 
-💡 **To get started, just say "Hello" to begin your personalized onboarding journey!**
+💡 **To get started, just say "Start my Onboarding" to begin your personalized onboarding journey!**
 
 **Ready to make onboarding easy? Let's get started!** ✨"""
 
@@ -668,7 +712,7 @@ I'm your **Employee Onboarding Agent** and I'm here to help make your first days
 📱 **To get started with your onboarding journey:**
 1️⃣ Click on my name: **@Employee Onboarding Agent**
 2️⃣ Select **"Message"** 
-3️⃣ Say **"Hello"** or **"Start onboarding"**
+3️⃣ Say **"Start my Onboarding"**
 
 🚀 **Once you message me, I can:**
 • 📋 Create your personalized onboarding checklist
@@ -697,6 +741,91 @@ I'm your **Employee Onboarding Agent** and I'm here to help make your first days
         except Exception as e:
             logger.error(f"❌ Error in _send_dm_with_fallback: {e}")
             return False
+
+    def _start_onboarding_flow(self, user_id: str, say, message_channel_type: str = 'im'):
+        """Start onboarding in DM; if in channel, direct user to DM. Reusable from multiple handlers."""
+        try:
+            # If called from a channel, direct to DM and exit
+            if message_channel_type == 'channel':
+                welcome_message = f"""👋 Hello <@{user_id}>! I'm your Employee Onboarding Agent!
+
+📱 **For personalized onboarding assistance:**
+1️⃣ Click my name: **@Employee Onboarding Agent**
+2️⃣ Select **"Message"** 
+3️⃣ Say **"Start my Onboarding"** in our direct conversation
+
+💡 **Send me a DM for your complete onboarding checklist and progress tracking!**"""
+                say(welcome_message)
+                return
+
+            # DM flow
+            logger.info(f"🔍 DEBUG - Attempting to get/create user: {user_id}")
+            user = self.get_or_create_user(user_id)
+            logger.info(f"🔍 DEBUG - User creation result: {user}")
+            if not user:
+                logger.error(f"❌ Failed to create/get user for {user_id}")
+                say("👋 Hello! I'm having trouble accessing your information right now. Please try again in a moment.")
+                return
+
+            if getattr(user, 'onboarding_completed', False):
+                response = f"👋 Welcome back, {user.full_name or 'there'}! Your onboarding is already complete. How can I help you today?"
+                say(response)
+                return
+
+            # Profile completeness (non-blocking)
+            logger.info(f"🔍 DEBUG - Starting profile analysis for user: {user_id}")
+            profile_analysis = self._analyze_user_profile(user_id)
+            logger.info(f"🔍 DEBUG - Profile analysis result: {profile_analysis.get('completion_score', 'N/A')}%")
+            if not profile_analysis.get("is_complete", False):
+                completion_message = self._create_profile_completion_message(profile_analysis)
+                say(f"📋 **Profile Information:** {completion_message}\n\n⚡ **Don't worry - let's continue with your onboarding!**")
+
+            # Assign tasks with generic fallback
+            try:
+                user_info = self.app.client.users_info(user=user_id)
+                profile = user_info.get("user", {}).get("profile", {})
+                job_title = profile.get("title", "")
+                inferred_title = job_title or "Other"
+                if self._assign_role_based_tasks(user_id, inferred_title):
+                    task_message = self._format_task_list_message(user_id)
+                    role_text = job_title if job_title else "General Onboarding"
+                    welcome_intro = f"""🎉 **Welcome to the team, {user.full_name or 'there'}!**
+
+I'm your AI onboarding assistant. I've created a personalized onboarding plan based on your role: **{role_text}**
+
+"""
+                    say(welcome_intro + task_message)
+                    self._initialize_task_monitoring(user_id)
+                else:
+                    simple_welcome = f"""🎉 **Welcome to the team, {user.full_name or 'there'}!**
+
+I'm your AI onboarding assistant! While I work on setting up your personalized tasks, I can help you with:
+
+• 📚 Company policies and procedures
+• 🕐 Working hours and guidelines  
+• 👔 Dress code information
+• 🤝 General onboarding questions
+• ❓ Any company-related queries
+
+**Ask me anything to get started!** 🚀"""
+                    say(simple_welcome)
+            except Exception as e:
+                logger.error(f"Error in task assignment phase: {e}")
+                fallback_assigned = self._assign_role_based_tasks(user_id, "Other")
+                if fallback_assigned:
+                    task_message = self._format_task_list_message(user_id)
+                    welcome_intro = f"""🎉 **Welcome to the team, {user.full_name or 'there'}!**
+
+I'm your AI onboarding assistant. I've created a general onboarding plan to get you started.
+
+"""
+                    say(welcome_intro + task_message)
+                    self._initialize_task_monitoring(user_id)
+                else:
+                    say("I'm here to help with policies, hours, dress code, and more. Ask me anything!")
+        except Exception as flow_error:
+            logger.error(f"Error in _start_onboarding_flow: {flow_error}")
+            say("Sorry, I couldn't start onboarding right now. Please try again shortly.")
 
     def _create_basic_user_record(self, slack_user_id: str):
         """Create a basic user record with minimal information for tracking"""
@@ -730,23 +859,29 @@ I'm your **Employee Onboarding Agent** and I'm here to help make your first days
             user_data = user_info["user"]
             profile_data = user_data.get("profile", {})
             
-            # Profile completeness check
+            # DEBUG: Print actual Slack API response
+            logger.info(f"DEBUG - Full profile_data: {profile_data}")
+            logger.info(f"DEBUG - Custom fields: {profile_data.get('fields', {})}")
+            logger.info(f"DEBUG - User data keys: {list(user_data.keys())}")
+            
+            # Profile completeness check - Fixed to match actual Slack profile fields
             analysis = {
-                "has_real_name": bool(user_data.get("real_name", "").strip()),
-                "has_display_name": bool(user_data.get("display_name", "").strip()),
+                "has_real_name": bool(profile_data.get("real_name", "").strip()),
+                "has_display_name": bool(profile_data.get("display_name", "").strip()),
                 "has_profile_image": not user_data.get("is_bot", False) and bool(profile_data.get("image_original")),
                 "has_job_title": bool(profile_data.get("title", "").strip()),
-                "has_department": bool(profile_data.get("fields", {}).get("department", {}).get("value", "").strip()),
+                "has_email": bool(profile_data.get("email", "").strip()),  # Added email field
                 "has_phone": bool(profile_data.get("phone", "").strip()),
-                "has_manager_info": bool(profile_data.get("fields", {}).get("manager", {}).get("value", "").strip()),
-                "has_start_date": bool(profile_data.get("fields", {}).get("start_date", {}).get("value", "").strip()),
+                # Use custom fields for organizational info
+                "has_department": self._extract_custom_field_value(profile_data, ["Department", "department"]),
+                "has_start_date": self._extract_custom_field_value(profile_data, ["Start Date", "start_date", "start date"]),
                 "raw_profile": profile_data,
                 "user_data": user_data
             }
             
             # Calculate completion score
-            required_fields = ["has_real_name", "has_job_title", "has_profile_image"]
-            optional_fields = ["has_display_name", "has_department", "has_phone", "has_manager_info", "has_start_date"]
+            required_fields = ["has_real_name", "has_job_title", "has_email"]
+            optional_fields = ["has_display_name", "has_profile_image", "has_phone", "has_department", "has_start_date"]
             
             required_complete = sum(1 for field in required_fields if analysis[field])
             optional_complete = sum(1 for field in optional_fields if analysis[field])
@@ -758,18 +893,23 @@ I'm your **Employee Onboarding Agent** and I'm here to help make your first days
             # Identify missing fields
             missing_fields = []
             if not analysis["has_real_name"]:
-                missing_fields.append("Real Name")
+                missing_fields.append("Full Name")
             if not analysis["has_job_title"]:
                 missing_fields.append("Job Title")
+            if not analysis["has_email"]:
+                missing_fields.append("Email Address")
             if not analysis["has_profile_image"]:
-                missing_fields.append("Profile Picture")
+                missing_fields.append("Profile Photo")
+            if not analysis["has_phone"]:
+                missing_fields.append("Phone Number")
             if not analysis["has_department"]:
                 missing_fields.append("Department")
-            if not analysis["has_manager_info"]:
-                missing_fields.append("Manager Information")
+            if not analysis["has_start_date"]:
+                missing_fields.append("Start Date")
             
             analysis["missing_fields"] = missing_fields
-            analysis["is_complete"] = completion_score >= 80 and len(missing_fields) == 0
+            # Profile is complete if user has the essential fields
+            analysis["is_complete"] = completion_score >= 60 or (analysis["has_real_name"] and analysis["has_job_title"] and analysis["has_email"])
             
             # Store in database
             self._store_profile_analysis(slack_user_id, analysis)
@@ -780,12 +920,49 @@ I'm your **Employee Onboarding Agent** and I'm here to help make your first days
             logger.error(f"Error analyzing user profile: {e}")
             return {"error": str(e), "completion_score": 0, "missing_fields": ["Unable to analyze profile"]}
 
+    def _extract_custom_field_value(self, profile_data: dict, field_names) -> bool:
+        """
+        Extract custom field value from Slack profile data
+        field_names: string or list of possible field names to check for
+        """
+        try:
+            fields = profile_data.get("fields", {})
+            if not fields:
+                return False
+            
+            # Convert single field name to list for compatibility
+            if isinstance(field_names, str):
+                field_names = [field_names]
+            
+            # Try to find field by name or partial name match
+            for field_id, field_data in fields.items():
+                if isinstance(field_data, dict):
+                    # Check field label/alt text for name match
+                    field_label = field_data.get("alt", "").lower()
+                    field_value = field_data.get("value", "").strip()
+                    
+                    # Check if any of the field names match
+                    for field_name in field_names:
+                        field_name_lower = field_name.lower()
+                        if (field_name_lower in field_label or 
+                            field_label in field_name_lower or
+                            field_name_lower == field_label):
+                            return bool(field_value)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error extracting custom field {field_names}: {e}")
+            return False
+
     def _store_profile_analysis(self, slack_user_id: str, analysis: dict):
         """Store profile analysis results in database"""
         try:
-            with next(get_db()) as db:
+            db = next(get_db())
+            try:
                 # Get user ID
                 user = db.query(models.User).filter(models.User.slack_user_id == slack_user_id).first()
+                print(user)
                 if not user:
                     return
                 
@@ -806,9 +983,9 @@ I'm your **Employee Onboarding Agent** and I'm here to help make your first days
                 profile_check.has_display_name = analysis.get("has_display_name", False)
                 profile_check.has_profile_image = analysis.get("has_profile_image", False)
                 profile_check.has_job_title = analysis.get("has_job_title", False)
-                profile_check.has_department = analysis.get("has_department", False)
+                profile_check.has_email = analysis.get("has_email", False)  # Added email field
                 profile_check.has_phone = analysis.get("has_phone", False)
-                profile_check.has_manager_info = analysis.get("has_manager_info", False)
+                profile_check.has_department = analysis.get("has_department", False)
                 profile_check.has_start_date = analysis.get("has_start_date", False)
                 profile_check.profile_completion_score = analysis.get("completion_score", 0)
                 profile_check.missing_fields = str(analysis.get("missing_fields", []))
@@ -822,6 +999,8 @@ I'm your **Employee Onboarding Agent** and I'm here to help make your first days
                 
                 profile_check.last_checked = func.now()
                 db.commit()
+            finally:
+                db.close()
                 
         except Exception as e:
             logger.error(f"Error storing profile analysis: {e}")
@@ -864,7 +1043,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
         Assign role-specific onboarding tasks based on job title
         """
         try:
-            with next(get_db()) as db:
+            db = next(get_db())
+            try:
                 # Get user
                 user = db.query(models.User).filter(models.User.slack_user_id == slack_user_id).first()
                 if not user:
@@ -895,6 +1075,7 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                         is_mandatory=task_data["mandatory"],
                         estimated_minutes=task_data["estimated_minutes"]
                     )
+                    print(task)
                     db.add(task)
                 
                 db.commit()
@@ -904,6 +1085,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                 self._create_task_reminders(user.id, db)
                 
                 return True
+            finally:
+                db.close()
                 
         except Exception as e:
             logger.error(f"Error assigning role-based tasks: {e}")
@@ -1085,7 +1268,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
     def _format_task_list_message(self, slack_user_id: str) -> str:
         """Create formatted message with user's assigned tasks"""
         try:
-            with next(get_db()) as db:
+            db = next(get_db())
+            try:
                 user = db.query(models.User).filter(models.User.slack_user_id == slack_user_id).first()
                 if not user:
                     return "❌ Error: User not found"
@@ -1122,6 +1306,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
 🚀 **Let's get started! Which task would you like to begin with?**"""
                 
                 return task_message
+            finally:
+                db.close()
                 
         except Exception as e:
             logger.error(f"Error formatting task list: {e}")
@@ -1130,7 +1316,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
     def update_user_role(self, slack_user_id: str, role: str, department: str = "", manager_email: str = ""):
         """Update user role and information"""
         try:
-            with next(get_db()) as db:
+            db = next(get_db())
+            try:
                 user = db.query(models.User).filter(
                     models.User.slack_user_id == slack_user_id
                 ).first()
@@ -1153,6 +1340,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                 db.commit()
                 logger.info(f"Updated user {user.full_name} with role {role}")
                 return True
+            finally:
+                db.close()
                 
         except Exception as e:
             logger.error(f"Error updating user role: {str(e)}")
@@ -1247,29 +1436,41 @@ Complete profiles help me assign the right onboarding tasks for your role and en
         return False
     
     def _show_user_tasks(self, slack_user_id: str, say):
-        """Task management is no longer available"""
-        say("📋 Task management has been simplified. I can help you with company policies, onboarding questions, and general guidance instead!")
+        """Show user their assigned tasks"""
+        task_message = self._format_task_list_message(slack_user_id)
+        say(task_message)
     
     def _show_user_progress(self, slack_user_id: str, say):
-        """Progress tracking is no longer available"""
-        say("📊 Progress tracking has been simplified. I can help you with company policies, onboarding questions, and general guidance instead!")
+        """Show user progress"""
+        task_message = self._format_task_list_message(slack_user_id)
+        say(f"📊 **Your Progress:**\n\n{task_message}")
     
     def _mark_task_completed(self, slack_user_id: str, task_id: int, say):
-        """Task completion is no longer available"""
-        say("✅ Task management has been simplified. I can help you with company policies, onboarding questions, and general guidance instead!")
+        """Mark task as completed"""
+        success = self._update_task_status(slack_user_id, task_id, TaskStatus.COMPLETED)
+        if success:
+            say(f"✅ Excellent! Task {task_id} marked as completed. Great progress!")
+        else:
+            say(f"❌ I couldn't find task {task_id} or there was an error updating it. Please try again.")
     
     def _mark_task_in_progress(self, slack_user_id: str, task_id: int, say):
-        """Task progress is no longer available"""
-        say("🔄 Task management has been simplified. I can help you with company policies, onboarding questions, and general guidance instead!")
+        """Mark task as in progress"""
+        success = self._update_task_status(slack_user_id, task_id, TaskStatus.IN_PROGRESS)
+        if success:
+            say(f"� Great! Task {task_id} is now in progress. You've got this!")
+        else:
+            say(f"❌ I couldn't find task {task_id} or there was an error updating it. Please try again.")
     
     def _get_task_help(self, slack_user_id: str, task_id: int, say):
-        """Task help is no longer available"""
-        say("❓ Task help has been simplified. I can help you with company policies, onboarding questions, and general guidance instead!")
+        """Get help for a specific task"""
+        help_message = self._get_task_help_details(slack_user_id, task_id)
+        say(help_message)
 
     def _update_task_status(self, slack_user_id: str, task_number: int, status: TaskStatus) -> bool:
         """Update the status of a specific task"""
         try:
-            with next(get_db()) as db:
+            db = next(get_db())
+            try:
                 user = db.query(models.User).filter(models.User.slack_user_id == slack_user_id).first()
                 if not user:
                     return False
@@ -1294,6 +1495,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                 db.commit()
                 logger.info(f"Updated task {task_number} for user {slack_user_id} to status {status}")
                 return True
+            finally:
+                db.close()
                 
         except Exception as e:
             logger.error(f"Error updating task status: {e}")
@@ -1302,7 +1505,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
     def _check_onboarding_completion(self, slack_user_id: str) -> bool:
         """Check if all mandatory tasks are completed"""
         try:
-            with next(get_db()) as db:
+            db = next(get_db())
+            try:
                 user = db.query(models.User).filter(models.User.slack_user_id == slack_user_id).first()
                 if not user:
                     return False
@@ -1321,6 +1525,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                     return True
                 
                 return False
+            finally:
+                db.close()
                 
         except Exception as e:
             logger.error(f"Error checking onboarding completion: {e}")
@@ -1329,12 +1535,13 @@ Complete profiles help me assign the right onboarding tasks for your role and en
     def _create_onboarding_completion_message(self, slack_user_id: str) -> str:
         """Create congratulatory message for completed onboarding"""
         try:
-            with next(get_db()) as db:
+            db = next(get_db())
+            try:
                 user = db.query(models.User).filter(models.User.slack_user_id == slack_user_id).first()
                 if not user:
                     return "🎉 Congratulations on completing your onboarding!"
                 
-                return f"""🎉🎊 **CONGRATULATIONS {user.name or 'there'}!** 🎊🎉
+                return f"""🎉🎊 **CONGRATULATIONS {user.full_name or 'there'}!** 🎊🎉
 
 ✅ **You've successfully completed your onboarding!** 
 
@@ -1357,6 +1564,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
 • Any questions about your role
 
 **Welcome to the team! We're excited to have you aboard!** 🚢⚓"""
+            finally:
+                db.close()
                 
         except Exception as e:
             logger.error(f"Error creating completion message: {e}")
@@ -1365,7 +1574,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
     def _get_task_help_details(self, slack_user_id: str, task_number: int) -> str:
         """Get detailed help for a specific task"""
         try:
-            with next(get_db()) as db:
+            db = next(get_db())
+            try:
                 user = db.query(models.User).filter(models.User.slack_user_id == slack_user_id).first()
                 if not user:
                     return "❌ Error: User not found"
@@ -1414,6 +1624,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
 🚀 **When ready, say "started task {task_number}" or "completed task {task_number}"**"""
                 
                 return help_message
+            finally:
+                db.close()
                 
         except Exception as e:
             logger.error(f"Error getting task help: {e}")
@@ -1422,7 +1634,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
     def get_or_create_user(self, slack_user_id: str):
         """Get existing user or create new user in database"""
         try:
-            with next(get_db()) as db:
+            db = next(get_db())
+            try:
                 # Try to get existing user
                 user = db.query(models.User).filter(models.User.slack_user_id == slack_user_id).first()
                 
@@ -1435,21 +1648,39 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                     user_info = self.app.client.users_info(user=slack_user_id)
                     profile = user_info.get("user", {}).get("profile", {})
                     
+                    # Extract job title and determine role
+                    job_title = profile.get("title", "")
+                    determined_role = self._determine_role_from_title(job_title) if job_title else models.UserRole.OTHER
+                    
+                    # Extract department from custom fields
+                    department = ""
+                    if profile.get("fields"):
+                        for field_id, field_data in profile["fields"].items():
+                            if isinstance(field_data, dict):
+                                field_label = field_data.get("alt", "").lower()
+                                if "department" in field_label:
+                                    department = field_data.get("value", "")
+                                    break
+                    
                     user = models.User(
                         slack_user_id=slack_user_id,
-                        name=profile.get("real_name", ""),
+                        full_name=profile.get("real_name", "") or profile.get("display_name", ""),
+                        display_name=profile.get("display_name", ""),
+                        job_title=job_title,
+                        phone=profile.get("phone", ""),
+                        profile_image_url=profile.get("image_original", ""),
                         email=profile.get("email", ""),
-                        role=models.UserRole.OTHER,  # Default role
-                        department="",
-                        manager_email="",
-                        onboarding_completed=False
+                        role=determined_role,  # Use determined role instead of always OTHER
+                        department=department,
+                        manager_email="",  # Manager info not available in standard Slack profile
+                        onboarding_status=models.OnboardingStatus.NOT_STARTED
                     )
                     
                     db.add(user)
                     db.commit()
                     db.refresh(user)
                     
-                    logger.info(f"Created new user: {slack_user_id}")
+                    logger.info(f"Created new user: {slack_user_id} with role {determined_role}")
                     return user
                     
                 except Exception as slack_error:
@@ -1457,12 +1688,16 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                     # Create minimal user record
                     user = models.User(
                         slack_user_id=slack_user_id,
-                        name="",
+                        full_name="",
+                        display_name="",
+                        job_title="",
+                        phone="",
+                        profile_image_url="",
                         email="",
                         role=models.UserRole.OTHER,
                         department="",
                         manager_email="",
-                        onboarding_completed=False
+                        onboarding_status=models.OnboardingStatus.NOT_STARTED
                     )
                     
                     db.add(user)
@@ -1471,6 +1706,8 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                     
                     logger.info(f"Created minimal user record: {slack_user_id}")
                     return user
+            finally:
+                db.close()
                     
         except Exception as e:
             logger.error(f"Error in get_or_create_user: {e}")
@@ -1516,11 +1753,14 @@ Just mention me in a channel or send me a direct message!
     def _user_exists_in_database(self, slack_user_id: str) -> bool:
         """Check if user already exists in our database"""
         try:
-            with next(get_db()) as db:
+            db = next(get_db())
+            try:
                 existing_user = db.query(models.User).filter(
                     models.User.slack_user_id == slack_user_id
                 ).first()
                 return existing_user is not None
+            finally:
+                db.close()
         except Exception as e:
             logger.error(f"Error checking if user exists: {e}")
             return False
