@@ -1640,6 +1640,68 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                 user = db.query(models.User).filter(models.User.slack_user_id == slack_user_id).first()
                 
                 if user:
+                    # Sync latest profile info from Slack into existing user
+                    try:
+                        user_info = self.app.client.users_info(user=slack_user_id)
+                        profile = user_info.get("user", {}).get("profile", {})
+
+                        updated_any_field = False
+
+                        full_name = profile.get("real_name", "") or profile.get("display_name", "")
+                        if full_name and user.full_name != full_name:
+                            user.full_name = full_name
+                            updated_any_field = True
+
+                        display_name = profile.get("display_name", "")
+                        if display_name and user.display_name != display_name:
+                            user.display_name = display_name
+                            updated_any_field = True
+
+                        job_title = profile.get("title", "")
+                        if job_title and user.job_title != job_title:
+                            user.job_title = job_title
+                            # Optionally refresh role based on new title
+                            try:
+                                determined_role = self._determine_role_from_title(job_title)
+                                if determined_role != user.role:
+                                    user.role = determined_role
+                                    updated_any_field = True
+                            except Exception:
+                                pass
+
+                        phone = profile.get("phone", "")
+                        if phone and user.phone != phone:
+                            user.phone = phone
+                            updated_any_field = True
+
+                        image_url = profile.get("image_original", "")
+                        if image_url and user.profile_image_url != image_url:
+                            user.profile_image_url = image_url
+                            updated_any_field = True
+
+                        email = profile.get("email", "")
+                        if email and user.email != email:
+                            user.email = email
+                            updated_any_field = True
+
+                        # Department from custom fields
+                        department = ""
+                        if profile.get("fields"):
+                            for field_id, field_data in profile["fields"].items():
+                                if isinstance(field_data, dict):
+                                    field_label = field_data.get("alt", "").lower()
+                                    if "department" in field_label:
+                                        department = field_data.get("value", "")
+                                        break
+                        if department and user.department != department:
+                            user.department = department
+                            updated_any_field = True
+
+                        if updated_any_field:
+                            db.commit()
+                            db.refresh(user)
+                    except Exception as sync_err:
+                        logger.warning(f"Could not sync existing user {slack_user_id}: {sync_err}")
                     return user
                 
                 # Create new user if not exists
