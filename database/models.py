@@ -56,7 +56,7 @@ class User(Base):
     start_date = Column(DateTime(timezone=True))
     onboarding_status = Column(Enum(OnboardingStatus), default=OnboardingStatus.NOT_STARTED)
     # Fields referenced by Slack handler
-    manager_email = Column(String(255), default="")
+    manager_email = Column(String(255), default=None)
     onboarding_completed = Column(Boolean, default=False)
     onboarding_completed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
