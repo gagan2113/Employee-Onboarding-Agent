@@ -151,13 +151,18 @@ class OnboardingTask(Base):
     
     # Relationships
     user = relationship("User")
-    reminders = relationship("TaskReminder", back_populates="task")
+    reminders = relationship(
+        "TaskReminder",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        passive_deletes=True
+    )
 
 class TaskReminder(Base):
     __tablename__ = "task_reminders"
     
     id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("onboarding_tasks.id"), nullable=False)
+    task_id = Column(Integer, ForeignKey("onboarding_tasks.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     reminder_count = Column(Integer, default=0)
     max_reminders = Column(Integer, default=2)

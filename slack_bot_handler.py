@@ -1241,8 +1241,20 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                 # Get role-specific tasks
                 tasks = self._get_role_specific_tasks(role)
                 
-                # Clear existing tasks for this user
-                db.query(models.OnboardingTask).filter(models.OnboardingTask.user_id == user.id).delete()
+                # Clear existing tasks and reminders for this user
+                existing_task_ids = [
+                    row.id
+                    for row in db.query(models.OnboardingTask.id).filter(models.OnboardingTask.user_id == user.id).all()
+                ]
+
+                if existing_task_ids:
+                    db.query(models.TaskReminder).filter(
+                        models.TaskReminder.task_id.in_(existing_task_ids)
+                    ).delete(synchronize_session=False)
+                    db.query(models.OnboardingTask).filter(
+                        models.OnboardingTask.id.in_(existing_task_ids)
+                    ).delete(synchronize_session=False)
+                    db.flush()
                 
                 # Create new tasks
                 for task_data in tasks:
@@ -1320,7 +1332,15 @@ Complete profiles help me assign the right onboarding tasks for your role and en
         try:
             current_time = datetime.utcnow()
             
-            # Clear existing tasks for this user using raw SQL
+            # Clear existing reminders and tasks for this user using raw SQL
+            delete_reminders_sql = """
+            DELETE FROM task_reminders
+            WHERE task_id IN (
+                SELECT id FROM onboarding_tasks WHERE user_id = :user_id
+            )
+            """
+            db.execute(text(delete_reminders_sql), {"user_id": user_id})
+
             delete_sql = "DELETE FROM onboarding_tasks WHERE user_id = :user_id"
             db.execute(text(delete_sql), {"user_id": user_id})
             
@@ -1347,7 +1367,7 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                     "task_name": task_data["name"],
                     "task_description": task_data["description"],
                     "task_category": task_data["category"],
-                    "role_specific": role.value,
+                    "role_specific": role.name,
                     "priority": task_data["priority"],
                     "due_date": due_date,
                     "status": "NOT_STARTED",
