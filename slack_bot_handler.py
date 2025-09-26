@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import asyncio
 import threading
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from knowledge_base import knowledge_processor
 from config.config_manager import ConfigurationManager
 
@@ -14,7 +14,7 @@ from config.config_manager import ConfigurationManager
 from database.database import get_db
 from database import models
 from database.models import TaskStatus, ProfileCompletionStatus, ReminderStatus
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 
 # Load environment variables
 load_dotenv()
@@ -1173,11 +1173,11 @@ I'm your AI onboarding assistant. I've created a general onboarding plan to get 
                 # Set status based on completion
                 if analysis.get("is_complete", False):
                     profile_check.status = ProfileCompletionStatus.COMPLETE
-                    profile_check.profile_completed_date = func.now()
+                    profile_check.profile_completed_date = datetime.now(timezone.utc)
                 else:
                     profile_check.status = ProfileCompletionStatus.INCOMPLETE
                 
-                profile_check.last_checked = func.now()
+                profile_check.last_checked = datetime.now(timezone.utc)
                 db.commit()
             except Exception as commit_error:
                 db.rollback()
@@ -1246,27 +1246,62 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                 
                 # Create new tasks
                 for task_data in tasks:
-                    task = models.OnboardingTask(
-                        user_id=user.id,
-                        task_name=task_data["name"],
-                        task_description=task_data["description"],
-                        task_category=task_data["category"],
-                        role_specific=role,
-                        priority=task_data["priority"],
-                        due_date=func.now() + timedelta(days=task_data["due_days"]),
-                        instructions=task_data["instructions"],
-                        resources=str(task_data["resources"]),
-                        is_mandatory=task_data["mandatory"],
-                        estimated_minutes=task_data["estimated_minutes"]
-                    )
-                    print(task)
-                    db.add(task)
+                    try:
+                        # CRITICAL FIX: Calculate due_date completely in Python using native datetime
+                        # Avoid any SQLAlchemy expression interpretation
+                        current_time = datetime.utcnow()  # Use utcnow() instead of now(timezone.utc)
+                        days_offset = task_data["due_days"]
+                        due_date_calculated = current_time + timedelta(days=days_offset)
+                        
+                        # Create task object with explicit field assignments
+                        task = models.OnboardingTask()
+                        task.user_id = user.id
+                        task.task_name = task_data["name"]
+                        task.task_description = task_data["description"]
+                        task.task_category = task_data["category"]
+                        task.role_specific = role
+                        task.priority = task_data["priority"]
+                        task.due_date = due_date_calculated  # Pure Python datetime object
+                        task.status = models.TaskStatus.NOT_STARTED
+                        task.instructions = task_data["instructions"]
+                        task.resources = str(task_data["resources"])
+                        task.is_mandatory = task_data["mandatory"]
+                        task.estimated_minutes = task_data["estimated_minutes"]
+                        # Explicitly set nullable datetime fields to None
+                        task.completed_date = None
+                        task.started_at = None
+                        task.completed_at = None
+                        task.completion_proof = None
+                        
+                        # Debug: Print the due_date to verify it's a proper datetime
+                        logger.info(f"Creating task '{task.task_name}' with due_date: {task.due_date} (type: {type(task.due_date)})")
+                        
+                        db.add(task)
+                        
+                    except Exception as task_error:
+                        logger.error(f"Error creating individual task: {task_error}")
+                        raise task_error
                 
-                db.commit()
-                logger.info(f"Assigned {len(tasks)} tasks to user {slack_user_id} for role {role}")
-                
-                # Create reminder entries for each task
-                self._create_task_reminders(user.id, db)
+                # Commit all tasks at once with proper error handling
+                try:
+                    db.commit()
+                    logger.info(f"Successfully assigned {len(tasks)} tasks to user {slack_user_id} for role {role}")
+                    
+                    # Create reminder entries for each task after successful commit
+                    self._create_task_reminders(user.id, db)
+                    
+                except Exception as commit_error:
+                    db.rollback()
+                    logger.error(f"ORM approach failed: {commit_error}")
+                    logger.info("Attempting fallback with raw SQL...")
+                    
+                    # FALLBACK: Use raw SQL to insert tasks
+                    try:
+                        self._assign_tasks_raw_sql(user.id, tasks, role, db)
+                        logger.info(f"Successfully assigned {len(tasks)} tasks using raw SQL fallback")
+                    except Exception as sql_error:
+                        logger.error(f"Raw SQL fallback also failed: {sql_error}")
+                        raise sql_error
                 
                 return True
             except Exception as commit_error:
@@ -1279,6 +1314,65 @@ Complete profiles help me assign the right onboarding tasks for your role and en
         except Exception as e:
             logger.error(f"Error assigning role-based tasks: {e}")
             return False
+
+    def _assign_tasks_raw_sql(self, user_id: int, tasks: list, role: models.UserRole, db):
+        """Fallback method to assign tasks using raw SQL to avoid SQLAlchemy datetime issues"""
+        try:
+            current_time = datetime.utcnow()
+            
+            # Clear existing tasks for this user using raw SQL
+            delete_sql = "DELETE FROM onboarding_tasks WHERE user_id = :user_id"
+            db.execute(text(delete_sql), {"user_id": user_id})
+            
+            # Insert tasks using raw SQL
+            insert_sql = """
+            INSERT INTO onboarding_tasks 
+            (user_id, task_name, task_description, task_category, role_specific, 
+             priority, due_date, status, instructions, resources, is_mandatory, 
+             estimated_minutes, completed_date, started_at, completed_at, completion_proof,
+             created_at, updated_at)
+            VALUES 
+            (:user_id, :task_name, :task_description, :task_category, :role_specific,
+             :priority, :due_date, :status, :instructions, :resources, :is_mandatory,
+             :estimated_minutes, :completed_date, :started_at, :completed_at, :completion_proof,
+             :created_at, :updated_at)
+            """
+            
+            for task_data in tasks:
+                # Calculate due date in pure Python
+                due_date = current_time + timedelta(days=task_data["due_days"])
+                
+                task_params = {
+                    "user_id": user_id,
+                    "task_name": task_data["name"],
+                    "task_description": task_data["description"],
+                    "task_category": task_data["category"],
+                    "role_specific": role.value,
+                    "priority": task_data["priority"],
+                    "due_date": due_date,
+                    "status": "NOT_STARTED",
+                    "instructions": task_data["instructions"],
+                    "resources": str(task_data["resources"]),
+                    "is_mandatory": task_data["mandatory"],
+                    "estimated_minutes": task_data["estimated_minutes"],
+                    "completed_date": None,
+                    "started_at": None,
+                    "completed_at": None,
+                    "completion_proof": None,
+                    "created_at": current_time,
+                    "updated_at": current_time
+                }
+                
+                db.execute(text(insert_sql), task_params)
+            
+            # Commit the raw SQL transaction
+            db.commit()
+            logger.info(f"Raw SQL method successfully inserted {len(tasks)} tasks for user {user_id}")
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Raw SQL fallback method failed: {e}")
+            raise e
 
     def _determine_role_from_title(self, job_title: str) -> models.UserRole:
         """Determine user role from job title"""
@@ -1440,10 +1534,14 @@ Complete profiles help me assign the right onboarding tasks for your role and en
             tasks = db.query(models.OnboardingTask).filter(models.OnboardingTask.user_id == user_id).all()
             
             for task in tasks:
+                # Calculate reminder date entirely in Python before creating the model
+                # This prevents SQLAlchemy from trying to use SQL date arithmetic
+                reminder_date = task.due_date - timedelta(days=1) if task.due_date else None
+                
                 reminder = models.TaskReminder(
                     task_id=task.id,
                     user_id=user_id,
-                    next_reminder_due=task.due_date - timedelta(days=1),  # Remind 1 day before due
+                    next_reminder_due=reminder_date,  # Remind 1 day before due
                     max_reminders=2
                 )
                 db.add(reminder)
@@ -1682,9 +1780,9 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                 target_task.status = status
                 
                 if status == TaskStatus.COMPLETED:
-                    target_task.completed_at = func.now()
+                    target_task.completed_at = datetime.now(timezone.utc)
                 elif status == TaskStatus.IN_PROGRESS:
-                    target_task.started_at = func.now()
+                    target_task.started_at = datetime.now(timezone.utc)
                 
                 db.commit()
                 logger.info(f"Updated task {task_number} for user {slack_user_id} to status {status}")
@@ -1712,9 +1810,9 @@ Complete profiles help me assign the right onboarding tasks for your role and en
                 ).count()
                 
                 if incomplete_mandatory == 0:
-                    # Mark user as onboarding completed
+                    # Mark user as onboarding completed with timezone-aware UTC datetime
                     user.onboarding_completed = True
-                    user.onboarding_completed_at = func.now()
+                    user.onboarding_completed_at = datetime.now(timezone.utc)
                     db.commit()
                     return True
                 
