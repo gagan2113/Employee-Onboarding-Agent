@@ -69,9 +69,27 @@ class GroqLLMWrapper:
             logger.error(f"Error generating with Groq LLM: {e}")
             return ["Error generating response"] * len(prompts)
 
-def create_groq_llm(temperature: float = 0.7, model: str = None) -> GroqLLMWrapper:
-    """Factory function to create Groq LLM instance"""
-    return GroqLLMWrapper(model_name=model, temperature=temperature)
+def create_groq_llm(temperature: float = 0.7, model: str = None, use_wrapper: bool = False):
+    """Factory function to create Groq LLM instance
+    
+    Args:
+        temperature: Model temperature
+        model: Model name to use
+        use_wrapper: If True, returns wrapped instance. If False, returns raw ChatGroq instance.
+    """
+    if use_wrapper:
+        return GroqLLMWrapper(model_name=model, temperature=temperature)
+    else:
+        # Return raw ChatGroq instance for direct LangChain compatibility
+        from app_settings import settings
+        return ChatGroq(
+            groq_api_key=settings.GROQ_API_KEY,
+            model_name=model or settings.GROQ_MODEL,
+            temperature=temperature,
+            max_tokens=2048,
+            timeout=30,
+            max_retries=2
+        )
 
 # Available Groq models
 GROQ_MODELS = {

@@ -47,13 +47,18 @@ class User(Base):
     slack_user_id = Column(String(100), unique=True, index=True, nullable=False)
     email = Column(String(255), unique=True, index=True)
     full_name = Column(String(255), nullable=False)
+    display_name = Column(String(255))
+    job_title = Column(String(255))
+    phone = Column(String(50))
+    profile_image_url = Column(String(500))
     role = Column(Enum(UserRole), nullable=False)
     department = Column(String(100))
-    manager_slack_id = Column(String(100))
-    manager_email = Column(String(255))  # Added for email notifications
-    location = Column(String(100))
     start_date = Column(DateTime(timezone=True))
     onboarding_status = Column(Enum(OnboardingStatus), default=OnboardingStatus.NOT_STARTED)
+    # Fields referenced by Slack handler
+    manager_email = Column(String(255), default=None)
+    onboarding_completed = Column(Boolean, default=False)
+    onboarding_completed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -131,24 +136,33 @@ class OnboardingTask(Base):
     due_date = Column(DateTime(timezone=True))
     status = Column(Enum(TaskStatus), default=TaskStatus.NOT_STARTED)
     assigned_date = Column(DateTime(timezone=True), server_default=func.now())
+    # Keep existing completed_date for backward compatibility
     completed_date = Column(DateTime(timezone=True))
+    # Fields referenced by Slack handler for status timestamps
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
     instructions = Column(Text)
     resources = Column(Text)  # JSON array of helpful links/documents
     is_mandatory = Column(Boolean, default=True)
     estimated_minutes = Column(Integer, default=30)
     completion_proof = Column(Text)  # Evidence of completion
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     user = relationship("User")
-    reminders = relationship("TaskReminder", back_populates="task")
+    reminders = relationship(
+        "TaskReminder",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        passive_deletes=True
+    )
 
 class TaskReminder(Base):
     __tablename__ = "task_reminders"
     
     id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("onboarding_tasks.id"), nullable=False)
+    task_id = Column(Integer, ForeignKey("onboarding_tasks.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     reminder_count = Column(Integer, default=0)
     max_reminders = Column(Integer, default=2)
@@ -175,10 +189,10 @@ class UserProfileCheck(Base):
     has_display_name = Column(Boolean, default=False)
     has_profile_image = Column(Boolean, default=False)
     has_job_title = Column(Boolean, default=False)
-    has_department = Column(Boolean, default=False)
+    has_email = Column(Boolean, default=False)  # Added email field
     has_phone = Column(Boolean, default=False)
-    has_manager_info = Column(Boolean, default=False)
-    has_start_date = Column(Boolean, default=False)
+    has_department = Column(Boolean, default=False)  # Custom field
+    has_start_date = Column(Boolean, default=False)  # Custom field
     profile_completion_score = Column(Integer, default=0)  # 0-100%
     missing_fields = Column(Text)  # JSON array of missing fields
     status = Column(Enum(ProfileCompletionStatus), default=ProfileCompletionStatus.INCOMPLETE)

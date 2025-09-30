@@ -15,10 +15,11 @@ class OnboardingAgent:
         self.slack_client = slack_client
         
         # Initialize tools
-        self.tools = [
-            DatabaseQueryTool(db_session),
-            SlackIntegrationTool(slack_client)
-        ]
+        self.tools = [DatabaseQueryTool(db_session)]
+        
+        # Only add Slack tool if client is available
+        if slack_client:
+            self.tools.append(SlackIntegrationTool(slack_client))
         
         # Initialize memory
         self.memory = ConversationBufferWindowMemory(
@@ -75,18 +76,51 @@ class OnboardingAgent:
         # Add context to the conversation
         context_msg = ""
         if context:
-            context_msg = f"\nContext: User ID: {user_id}"
+            context_msg = f"Context: User ID: {user_id}"
             if context.get("current_step"):
                 context_msg += f", Current Step: {context['current_step']}"
             if context.get("user_info"):
                 context_msg += f", User Info: {json.dumps(context['user_info'])}"
         
-        # Prepare the full message with context
-        full_message = f"{self.system_prompt}\n{context_msg}\n\nUser: {message}"
-        
         try:
-            response = self.agent.run(full_message)
-            return response
+            # Try the LangChain agent first
+            try:
+                # Prepare the full message with context
+                full_message = f"{self.system_prompt}\n{context_msg}\n\nUser: {message}"
+                
+                # For CHAT_CONVERSATIONAL_REACT_DESCRIPTION agent, we need both input and chat_history
+                agent_input = {
+                    "input": full_message,
+                    "chat_history": self.memory.chat_memory.messages if self.memory else []
+                }
+                
+                response = self.agent.invoke(agent_input)
+                
+                # Extract the output based on response structure
+                if isinstance(response, dict):
+                    return response.get("output", response.get("text", str(response)))
+                else:
+                    return str(response)
+                    
+            except Exception as agent_error:
+                # Fallback: Use direct LLM call with simpler approach
+                print(f"Agent invoke failed: {agent_error}, using direct LLM approach...")
+                
+                # Create a simple prompt template
+                prompt = ChatPromptTemplate.from_messages([
+                    SystemMessage(content=self.system_prompt),
+                    HumanMessage(content=f"{context_msg}\n\nUser: {message}")
+                ])
+                
+                # Get response from LLM directly
+                messages = prompt.format_messages()
+                response = self.llm.invoke(messages)
+                
+                if hasattr(response, 'content'):
+                    return response.content
+                else:
+                    return str(response)
+                
         except Exception as e:
             return f"I apologize, but I encountered an error processing your message. Please try again or contact support. Error: {str(e)}"
     

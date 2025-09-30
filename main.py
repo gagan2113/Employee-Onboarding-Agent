@@ -40,7 +40,7 @@ app.add_middleware(
 
 # Initialize components
 slack_bot = SlackBotHandler()
-llm = create_groq_llm(temperature=0.7)
+llm = create_groq_llm(temperature=0.7, use_wrapper=False)  # Use raw ChatGroq for LangChain compatibility
 
 # Start background job manager
 logger.info("🚀 Starting background job manager...")
@@ -50,16 +50,22 @@ logger.info("✅ Background job manager started")
 # Register cleanup function
 atexit.register(stop_background_jobs)
 
-# Global variable for agent (will be initialized per request)
-onboarding_agent = None
-
+# Thread-safe agent factory (creates fresh agent per request)
 def get_agent(db: Session = Depends(get_db)):
-    """Get or create onboarding agent"""
-    global onboarding_agent
-    if not onboarding_agent:
+    """Create a fresh onboarding agent for each request with proper database session"""
+    try:
+        # Get Slack client if available
         client = slack_bot.app.client if (slack_bot.app and not slack_bot.test_mode) else None
-        onboarding_agent = OnboardingAgent(llm, db, client)
-    return onboarding_agent
+        
+        # Create new agent instance with fresh database session
+        agent = OnboardingAgent(llm, db, client)
+        logger.info(f"✅ Created fresh onboarding agent with database session: {id(db)}")
+        return agent
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create onboarding agent: {e}")
+        # Return a minimal fallback agent
+        return OnboardingAgent(llm, db, None)
 
 @app.get("/")
 async def root():
@@ -82,6 +88,7 @@ async def get_onboarding_status(user_id: str, db: Session = Depends(get_db)):
     """Get onboarding status for a user"""
     try:
         user = db.query(models.User).filter(models.User.slack_user_id == user_id).first()
+        logger.info(f"🔍 Retrieved user for status check: {user_id} -> {user}")
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
@@ -119,15 +126,23 @@ async def process_message(
         
         # Store interaction in database
         user = db.query(models.User).filter(models.User.slack_user_id == user_id).first()
+        logger.info(f"💬 Processed message for user: {user_id} -> {user}")
+        logger.debug(f"🤖 Agent response: {response}")
+        
         if user:
-            interaction = models.UserInteraction(
-                user_id=user.id,
-                message=message,
-                response=response,
-                interaction_type="message"
-            )
-            db.add(interaction)
-            db.commit()
+            try:
+                interaction = models.UserInteraction(
+                    user_id=user.id,
+                    message=message,
+                    response=response,
+                    interaction_type="message"
+                )
+                db.add(interaction)
+                db.commit()
+                logger.info(f"✅ Stored interaction for user: {user_id}")
+            except Exception as db_error:
+                logger.error(f"❌ Failed to store interaction: {db_error}")
+                db.rollback()  # Rollback on error
         
         return {
             "response": response,
@@ -200,11 +215,18 @@ if __name__ == "__main__":
     import threading
     import signal
     import sys
+    import time
     
     # Handle shutdown gracefully
     def signal_handler(sig, frame):
-        logger.info("🛑 Shutting down...")
+        logger.info("🛑 Shutting down gracefully...")
         stop_background_jobs()
+        if not slack_bot.test_mode and hasattr(slack_bot, 'handler') and slack_bot.handler:
+            try:
+                slack_bot.handler.close()
+                logger.info("✅ Slack handler closed")
+            except Exception as e:
+                logger.error(f"⚠️ Error closing Slack handler: {e}")
         sys.exit(0)
     
     signal.signal(signal.SIGINT, signal_handler)
@@ -213,21 +235,27 @@ if __name__ == "__main__":
     if not slack_bot.test_mode:
         def start_slack_bot():
             try:
-                logger.info("🤖 Starting Slack Socket Mode handler...")
-                slack_bot.handler.start()
+                logger.info("🤖 Starting Slack Socket Mode handler in background thread...")
+                slack_bot.start_async()
             except Exception as e:
                 logger.error(f"❌ Slack bot error: {e}")
         
+        # Start Slack bot in background thread to avoid blocking FastAPI
         slack_thread = threading.Thread(target=start_slack_bot, daemon=True)
         slack_thread.start()
-        logger.info("✅ Slack bot started in background")
+        
+        # Give Slack bot a moment to initialize
+        time.sleep(2)
+        logger.info("✅ Slack bot thread started")
     else:
         logger.info("🧪 Slack bot in TEST MODE - API still available")
     
     # Start FastAPI server
+    logger.info("🚀 Starting FastAPI server...")
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=False  # Disable reload to prevent threading issues
+        port=8080,
+        reload=False,  # Keep disabled for threading stability
+        log_level="info"
     )
