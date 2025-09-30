@@ -95,26 +95,25 @@ class SlackBotHandler:
                 if profile_analysis.get("is_complete", False):
                     say("✅ Great! Your profile is now complete. Let me set up your onboarding tasks...")
                     
-                    # Get user profile to determine role
+                    # Get user profile to determine role (fallback to general if missing)
                     user_info = self.app.client.users_info(user=user_id)
                     profile = user_info.get("user", {}).get("profile", {})
                     job_title = profile.get("title", "")
+                    inferred_title = job_title or "Other"
                     
-                    if job_title:
-                        user = self.get_or_create_user(user_id)
-                        if self._assign_role_based_tasks(user_id, job_title):
-                            task_message = self._format_task_list_message(user_id)
-                            welcome_intro = f"""🎉 **Perfect! Your onboarding is now ready.**
+                    user = self.get_or_create_user(user_id)
+                    if self._assign_role_based_tasks(user_id, inferred_title):
+                        task_message = self._format_task_list_message(user_id)
+                        role_text = job_title if job_title else "General Onboarding"
+                        welcome_intro = f"""🎉 **Perfect! Your onboarding is now ready.**
 
-I've created a personalized plan based on your role: **{job_title}**
+I've created a personalized plan based on your role: **{role_text}**
 
 """
-                            say(welcome_intro + task_message)
-                            self._initialize_task_monitoring(user_id)
-                        else:
-                            say("❌ I encountered an issue setting up your tasks. Please contact HR.")
+                        say(welcome_intro + task_message)
+                        self._initialize_task_monitoring(user_id)
                     else:
-                        say("🎯 I still need your job title to assign the right tasks. Please update your Slack profile with your job title and say 'profile updated' again.")
+                        say("❌ I encountered an issue setting up your tasks. Please contact HR.")
                 else:
                     # Update stored analysis and send new completion message
                     completion_message = self._create_profile_completion_message(profile_analysis)
@@ -172,16 +171,16 @@ I've created a personalized plan based on your role: **{job_title}**
                     say(response)
                     return
                 
-                # Phase 1: Profile Completeness Check (Non-blocking)
+                # Phase 1: Profile Completeness Check (Gate onboarding until complete)
                 logger.info(f"🔍 DEBUG - Starting profile analysis for user: {user_id}")
                 profile_analysis = self._analyze_user_profile(user_id)
                 logger.info(f"🔍 DEBUG - Profile analysis result: {profile_analysis.get('completion_score', 'N/A')}%")
                 
-                # Optional: If profile is incomplete, inform user but don't block onboarding
-                if not profile_analysis.get("is_complete", False):
+                # If essential fields are missing, send completion guidance and stop here
+                if not (profile_analysis.get("has_real_name") and profile_analysis.get("has_job_title") and profile_analysis.get("has_email")):
                     completion_message = self._create_profile_completion_message(profile_analysis)
-                    say(f"📋 **Profile Information:** {completion_message}\n\n⚡ **Don't worry - let's continue with your onboarding!**")
-                    # Continue with onboarding instead of returning
+                    say(completion_message)
+                    return
                 
                 # Phase 2: Role-based Task Assignment (with fallback)
                 try:
@@ -454,16 +453,16 @@ I can help you with:
                     say(response)
                     return
                 
-                # Phase 1: Profile Completeness Check (Non-blocking)
+                # Phase 1: Profile Completeness Check (Gate onboarding until complete)
                 logger.info(f"🔍 DEBUG - Starting profile analysis for user: {user_id}")
                 profile_analysis = self._analyze_user_profile(user_id)
                 logger.info(f"🔍 DEBUG - Profile analysis result: {profile_analysis.get('completion_score', 'N/A')}%")
                 
-                # Optional: If profile is incomplete, inform user but don't block onboarding
-                if not profile_analysis.get("is_complete", False):
+                # If essential fields are missing, send completion guidance and stop here
+                if not (profile_analysis.get("has_real_name") and profile_analysis.get("has_job_title") and profile_analysis.get("has_email")):
                     completion_message = self._create_profile_completion_message(profile_analysis)
-                    say(f"📋 **Profile Information:** {completion_message}\n\n⚡ **Don't worry - let's continue with your onboarding!**")
-                    # Continue with onboarding instead of returning
+                    say(completion_message)
+                    return
                 
                 # Phase 2: Role-based Task Assignment (with fallback)
                 try:
@@ -954,13 +953,14 @@ I'm your **Employee Onboarding Agent** and I'm here to help make your first days
                 say(response)
                 return
 
-            # Profile completeness (non-blocking)
+            # Profile completeness (Gate onboarding until complete)
             logger.info(f"🔍 DEBUG - Starting profile analysis for user: {user_id}")
             profile_analysis = self._analyze_user_profile(user_id)
             logger.info(f"🔍 DEBUG - Profile analysis result: {profile_analysis.get('completion_score', 'N/A')}%")
-            if not profile_analysis.get("is_complete", False):
+            if not (profile_analysis.get("has_real_name") and profile_analysis.get("has_job_title") and profile_analysis.get("has_email")):
                 completion_message = self._create_profile_completion_message(profile_analysis)
-                say(f"📋 **Profile Information:** {completion_message}\n\n⚡ **Don't worry - let's continue with your onboarding!**")
+                say(completion_message)
+                return
 
             # Assign tasks with generic fallback
             try:
