@@ -62,7 +62,6 @@ This Employee Onboarding Agent provides an intelligent, automated onboarding exp
 - Python 3.8 or higher
 - PostgreSQL database
 - Slack workspace with bot permissions
-- Redis server
 - Slack workspace with bot permissions
 - Groq API key (from console.groq.com)
 
@@ -91,8 +90,6 @@ SLACK_APP_TOKEN=xapp-your-app-token
 GROQ_API_KEY=your-groq-api-key
 GROQ_MODEL=llama-3.1-70b-versatile
 
-# Redis
-REDIS_URL=redis://localhost:6379
 
 # Security
 SECRET_KEY=your-secret-key
@@ -313,7 +310,7 @@ Employee Onboarding Agent/
 ├── slack_integration/
 │   └── bot.py             # Slack bot implementation
 ├── services/
-│   ├── celery_app.py      # Celery configuration
+│   ├── background_jobs.py # Background jobs (schedule/threading)
 │   ├── tasks.py           # Background tasks
 │   └── seed_data.py       # Database seeding
 ├── tests/
