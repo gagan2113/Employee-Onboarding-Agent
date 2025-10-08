@@ -14,6 +14,7 @@ from config.config_manager import ConfigurationManager
 from database.database import get_db
 from database import models
 from database.models import TaskStatus, ProfileCompletionStatus, ReminderStatus
+from database.database import Base, engine
 from sqlalchemy.sql import func, text
 
 # Load environment variables
@@ -22,6 +23,14 @@ load_dotenv()
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Ensure DB tables exist when this module is imported (handles standalone Slack bot runs)
+try:
+    # models is already imported above, so metadata is populated
+    Base.metadata.create_all(bind=engine)
+    logger.info("✅ Database tables ensured on Slack bot initialization")
+except Exception as _db_init_err:
+    logger.warning(f"⚠️ Could not ensure database tables at import: {_db_init_err}")
 
 class SlackBotHandler:
     def __init__(self):
